@@ -260,6 +260,35 @@ fn uninstall_removes_only_hash_matched_mcp_table() {
 }
 
 #[test]
+fn uninstall_cleans_a_stale_megara_managed_native_question_setting() {
+    let project = tempdir().unwrap();
+    let codex_home = tempdir().unwrap();
+    let config = project.path().join(".codex/config.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(
+        &config,
+        "[features]\ndefault_mode_request_user_input = true\n# MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT\n# MEGARA:MCP-SHA256=sha256:stale\n",
+    )
+    .unwrap();
+
+    let output = megara_with_codex_home(codex_home.path())
+        .args(["uninstall", "--scope", "project", "--target", "codex"])
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let remaining = fs::read_to_string(config).unwrap();
+    assert!(!remaining.contains("default_mode_request_user_input"));
+    assert!(!remaining.contains("MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT"));
+    assert!(remaining.contains("MEGARA:MCP-SHA256=sha256:stale"));
+}
+
+#[test]
 fn forced_uninstall_of_hash_matched_table_does_not_require_backup() {
     let project = tempdir().unwrap();
     let codex_home = tempdir().unwrap();

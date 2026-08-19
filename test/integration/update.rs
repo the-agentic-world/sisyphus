@@ -9,6 +9,7 @@ fn update_refreshes_project_harness_and_removes_obsolete_projection() {
     let home = tempdir().unwrap();
     let codex_home = tempdir().unwrap();
     let fake_bin = tempdir().unwrap();
+    let fallback_runtime = tempdir().unwrap();
     let obsolete_skill = dir.path().join(
         super::planning::migration::inventory::managed_projection_paths()
             .iter()
@@ -16,7 +17,35 @@ fn update_refreshes_project_harness_and_removes_obsolete_projection() {
             .unwrap(),
     );
 
-    install_project_harness(dir.path(), codex_home.path());
+    write_codex_runtime(fallback_runtime.path(), false);
+    let initial_path = format!(
+        "{}:{}",
+        fallback_runtime.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let install = megara_with_codex_home(codex_home.path())
+        .args([
+            "install",
+            "--scope",
+            "project",
+            "--target",
+            "codex",
+            "--trust-project",
+            "--no-interactive",
+        ])
+        .env("PATH", initial_path)
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        install.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&install.stderr)
+    );
+    let config = dir.path().join(".codex/config.toml");
+    assert!(!fs::read_to_string(&config)
+        .unwrap()
+        .contains("default_mode_request_user_input"));
     fs::create_dir_all(obsolete_skill.parent().unwrap()).unwrap();
     fs::write(
         &obsolete_skill,
@@ -41,6 +70,7 @@ fn update_refreshes_project_harness_and_removes_obsolete_projection() {
     let mut permissions = fs::metadata(&curl).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&curl, permissions).unwrap();
+    write_codex_runtime(fake_bin.path(), true);
 
     let path = format!(
         "{}:{}",
@@ -88,6 +118,9 @@ fn update_refreshes_project_harness_and_removes_obsolete_projection() {
         .join(".agents/skills/agent-models/SKILL.md")
         .exists());
     assert!(dir.path().join(".agents/bin/insane-search").exists());
+    let updated_config = fs::read_to_string(config).unwrap();
+    assert!(updated_config.contains("default_mode_request_user_input = true"));
+    assert!(updated_config.contains("MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT"));
     let wrapper = fs::read_to_string(dir.path().join(".agents/bin/insane-search")).unwrap();
     assert!(wrapper.contains(r#"runtime_root="$root_dir/../.megara""#));
     assert!(wrapper.contains("state/tools/insane-search"));

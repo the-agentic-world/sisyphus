@@ -17,11 +17,6 @@ pub(super) fn default_locale() -> String {
     DEFAULT_LOCALE.to_string()
 }
 
-pub(super) fn codex_config() -> String {
-    "# Megara Codex projection.\n# Codex discovers skills and agents from this directory.\n"
-        .to_string()
-}
-
 impl HarnessConfig {
     pub(super) fn from_registry(registry: &TemplateRegistry) -> Result<Self> {
         let Some(template) = registry.config() else {

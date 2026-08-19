@@ -76,10 +76,17 @@ pub fn run(_registry: &TemplateRegistry, options: DoctorOptions) -> Result<Docto
         }
 
         let ssot_registry = TemplateRegistry::from_ssot_root(&paths.ssot_root)?;
+        let codex_runtime_features =
+            (options.target == TargetRuntime::Codex).then(codex::detect_runtime_features);
         let projection_files = match options.target {
-            TargetRuntime::Codex => {
-                codex::projection_files(paths.target_root.clone(), options.scope, &ssot_registry)?
-            }
+            TargetRuntime::Codex => codex::projection_files(
+                paths.target_root.clone(),
+                options.scope,
+                &ssot_registry,
+                codex_runtime_features
+                    .as_ref()
+                    .expect("Codex projection has runtime features"),
+            )?,
             TargetRuntime::Pi => {
                 pi::projection_files(paths.target_root.clone(), options.scope, &ssot_registry)?
             }
@@ -108,6 +115,34 @@ pub fn run(_registry: &TemplateRegistry, options: DoctorOptions) -> Result<Docto
                 &ssot_registry,
                 &mut warnings,
             )?;
+        }
+        if options.target == TargetRuntime::Codex
+            && options.scope == crate::paths::InstallScope::Project
+            && !codex::is_project_trusted(
+                paths
+                    .target_root
+                    .parent()
+                    .expect("project Codex target root has a parent"),
+            )?
+        {
+            warnings.push(
+                "Codex project is not explicitly trusted; its .codex config may stay inactive. Rerun install with --trust-project after reviewing the project."
+                    .to_string(),
+            );
+        }
+        if let Some(runtime_features) = &codex_runtime_features {
+            observations.push(format!(
+                "Codex runtime version: {}; request_user_input={}",
+                runtime_features
+                    .version
+                    .as_deref()
+                    .unwrap_or("not detected"),
+                if runtime_features.default_mode_request_user_input {
+                    "available"
+                } else {
+                    "Markdown fallback"
+                }
+            ));
         }
     }
 

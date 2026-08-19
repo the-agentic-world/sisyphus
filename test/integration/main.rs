@@ -14,6 +14,29 @@ fn megara_with_codex_home(codex_home: &Path) -> Command {
     command
 }
 
+#[cfg(unix)]
+fn write_codex_runtime(bin_dir: &Path, supports_request_user_input: bool) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(bin_dir).unwrap();
+    let feature_case = if supports_request_user_input {
+        "  features:list) printf '%s\\n' 'multi_agent stable true' 'default_mode_request_user_input under development false' ;;"
+    } else {
+        "  features:list) exit 2 ;;"
+    };
+    let runtime = bin_dir.join("codex");
+    fs::write(
+        &runtime,
+        format!(
+            "#!/bin/sh\ncase \"$1:$2\" in\n  --version:) printf '%s\\n' 'codex-cli 0.148.0' ;;\n{feature_case}\n  *) exit 2 ;;\nesac\n"
+        ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&runtime).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(runtime, permissions).unwrap();
+}
+
 fn install_project_harness(project: &Path, codex_home: &Path) {
     let install = megara_with_codex_home(codex_home)
         .arg("install")
@@ -21,6 +44,7 @@ fn install_project_harness(project: &Path, codex_home: &Path) {
         .arg("project")
         .arg("--target")
         .arg("codex")
+        .arg("--trust-project")
         .current_dir(project)
         .output()
         .unwrap();
@@ -38,6 +62,7 @@ mod install;
 mod install_global;
 mod install_listing;
 mod install_sync;
+mod install_trust;
 mod legacy_cli_removal;
 mod pi;
 #[allow(dead_code, unused_imports)]

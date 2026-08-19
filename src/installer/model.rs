@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::{
     cli::{resolve_scope, resolve_target, DoctorArgs, InstallArgs, ScopeArg, SyncArgs},
     paths::{InstallPaths, InstallScope, TargetRuntime},
+    targets::codex,
     writer::WriteSummary,
 };
 
@@ -185,6 +186,7 @@ pub struct InstallPlan {
     pub ssot_root: PathBuf,
     pub runtime_root: PathBuf,
     pub target_root: PathBuf,
+    pub codex_runtime_features: Option<codex::CodexRuntimeFeatures>,
     pub files: Vec<PlannedFile>,
     pub managed_toml_edits: Vec<super::managed_edit::ManagedTomlEdit>,
     pub obsolete_files: Vec<PathBuf>,
@@ -207,5 +209,6 @@ pub struct InstallResult {
     pub plan: InstallPlan,
     pub summary: WriteSummary,
     pub migrations: Vec<StateMigrationSummary>,
+    pub project_trust: Option<codex::ProjectTrustSummary>,
     pub warnings: Vec<String>,
 }
