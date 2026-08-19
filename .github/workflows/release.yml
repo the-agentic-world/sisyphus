@@ -307,25 +307,38 @@ jobs:
           set -euo pipefail
           project="${RUNNER_TEMP}/codex-project"
           codex_home="${RUNNER_TEMP}/codex-home"
+          codex_runtime="${RUNNER_TEMP}/codex-runtime"
+          mkdir -p "${codex_runtime}"
+          printf '%s\n' \
+            '#!/usr/bin/env sh' \
+            'case "$1:$2" in' \
+            '  --version:) printf "%s\\n" "codex-cli 0.148.0" ;;' \
+            '  features:list) printf "%s\\n" "multi_agent stable true" "default_mode_request_user_input under development false" ;;' \
+            '  *) exit 2 ;;' \
+            'esac' > "${codex_runtime}/codex"
+          chmod +x "${codex_runtime}/codex"
           mkdir -p "${project}"
           cd "${project}"
-          CODEX_HOME="${codex_home}" "${RUNNER_TEMP}/bin/megara" install --scope project --target codex --trust-project --no-interactive
+          PATH="${codex_runtime}:${PATH}" CODEX_HOME="${codex_home}" "${RUNNER_TEMP}/bin/megara" install --scope project --target codex --trust-project --no-interactive
           test -f .codex/AGENTS.md
           test -f .codex/agents/executor.toml
           test -f .codex/config.toml
           grep -q 'megara_planning' .codex/config.toml
+          grep -q 'default_mode_request_user_input = true' .codex/config.toml
           grep -q 'Planning state is owned' .codex/AGENTS.md
+          grep -q 'trust_level = "trusted"' "${codex_home}/config.toml"
           test ! -e .codex/hooks.json
           if test -f "${codex_home}/config.toml"; then
             ! grep -q 'post_tool_use' "${codex_home}/config.toml"
           fi
-          "${RUNNER_TEMP}/bin/megara" doctor --scope project --target codex --json
+          PATH="${codex_runtime}:${PATH}" CODEX_HOME="${codex_home}" "${RUNNER_TEMP}/bin/megara" doctor --scope project --target codex --json
           mkdir -p .megara/state
           touch .megara/state/recovery.json
-          CODEX_HOME="${codex_home}" "${RUNNER_TEMP}/bin/megara" uninstall --scope project --target codex
+          PATH="${codex_runtime}:${PATH}" CODEX_HOME="${codex_home}" "${RUNNER_TEMP}/bin/megara" uninstall --scope project --target codex
           test ! -e .codex/AGENTS.md
           test ! -e .codex/agents/executor.toml
           ! grep -q 'megara_planning' .codex/config.toml
+          ! grep -q 'default_mode_request_user_input' .codex/config.toml
           test ! -e .codex/hooks.json
           test ! -e .agents/megara.toml
           test -f .megara/state/recovery.json

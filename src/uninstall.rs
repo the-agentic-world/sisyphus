@@ -39,10 +39,17 @@ pub fn run(args: UninstallArgs, registry: &TemplateRegistry) -> Result<()> {
         },
     )
     .plan_without_managed_edits()?;
-    let managed_config = if target == TargetRuntime::Codex && scope == InstallScope::Project {
-        codex::plan_remove_mcp_config(&plan.target_root, args.force)?
+    let managed_configs = if target == TargetRuntime::Codex {
+        match scope {
+            InstallScope::Project => codex::plan_remove_mcp_config(&plan.target_root, args.force)?
+                .into_iter()
+                .collect::<Vec<_>>(),
+            InstallScope::Global => codex::plan_remove_global_config(&plan.target_root)?
+                .into_iter()
+                .collect::<Vec<_>>(),
+        }
     } else {
-        None
+        Vec::new()
     };
     let keep_shared_files = other_managed_projection_exists(scope, target, registry)?;
     let paths = if keep_shared_files {
@@ -57,6 +64,10 @@ pub fn run(args: UninstallArgs, registry: &TemplateRegistry) -> Result<()> {
     let paths = paths
         .into_iter()
         .chain(plan.obsolete_files)
+        .chain(
+            (target == TargetRuntime::Codex && scope == InstallScope::Global)
+                .then(|| plan.target_root.join("config.toml")),
+        )
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -64,12 +75,12 @@ pub fn run(args: UninstallArgs, registry: &TemplateRegistry) -> Result<()> {
     let mut removed = if args.dry_run {
         planned_removed
     } else {
-        if let Some(edit) = &managed_config {
+        for edit in &managed_configs {
             edit.apply(false)?;
         }
         remove_managed_files(&paths, false)?
     };
-    if let Some(edit) = &managed_config {
+    for edit in &managed_configs {
         if edit.changed {
             removed.push(edit.path.clone());
         }
@@ -108,7 +119,7 @@ fn other_managed_projection_exists(
             json: false,
         },
     )
-    .plan()?;
+    .plan_without_managed_edits()?;
     Ok(plan
         .files
         .iter()

@@ -9,7 +9,7 @@ use crate::{
     templates::TemplateRegistry,
 };
 
-use super::{agent::agent_toml, agents_md::codex_agents_md, config::codex_config};
+use super::{agent::agent_toml, agents_md::codex_agents_md, runtime::CodexRuntimeFeatures};
 
 pub(super) fn projection_plan(
     root: PathBuf,
@@ -17,13 +17,26 @@ pub(super) fn projection_plan(
     registry: &TemplateRegistry,
     force: bool,
     include_managed_edit: bool,
+    runtime_features: &CodexRuntimeFeatures,
 ) -> Result<(Vec<PlannedFile>, Option<ManagedTomlEdit>)> {
     let megara_bin = env::current_exe()
         .context("failed to resolve current megara executable")?
         .canonicalize()
         .context("failed to canonicalize current megara executable")?;
-    let managed_config = if include_managed_edit && scope == InstallScope::Project {
-        Some(super::mcp_config::plan(&root, &megara_bin, force)?)
+    let managed_config = if include_managed_edit {
+        match scope {
+            InstallScope::Project => Some(super::mcp_config::plan(
+                &root,
+                &megara_bin,
+                force,
+                runtime_features.default_mode_request_user_input,
+            )?),
+            InstallScope::Global => super::global_config::plan(
+                &root,
+                runtime_features.default_mode_request_user_input,
+                force,
+            )?,
+        }
     } else {
         None
     };
@@ -31,10 +44,6 @@ pub(super) fn projection_plan(
         root.join("AGENTS.md"),
         codex_agents_md(registry)?,
     )];
-
-    if scope == InstallScope::Global {
-        files.push(PlannedFile::new(root.join("config.toml"), codex_config()));
-    }
 
     if scope == InstallScope::Global {
         for skill in registry.skills() {

@@ -14,7 +14,10 @@ pub struct InstallArgs {
     pub dry_run: bool,
     #[arg(long)]
     pub force: bool,
-    #[arg(long, help = "Trust project-local Pi role agents after installation")]
+    #[arg(
+        long,
+        help = "Trust this project in Codex or allow project-local Pi role agents after installation"
+    )]
     pub trust_project: bool,
     #[arg(long)]
     pub json: bool,

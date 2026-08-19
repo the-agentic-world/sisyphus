@@ -87,6 +87,38 @@ impl InstallResult {
             ));
         }
 
+        if let Some(project_trust) = &self.project_trust {
+            sections.push(Section::new(
+                "Project Trust",
+                vec![format!(
+                    "Codex project trust: registered={}, unchanged={}, skipped={}, project={}, config={}",
+                    project_trust.registered,
+                    project_trust.unchanged,
+                    project_trust.skipped,
+                    project_trust.project_root.display(),
+                    project_trust.config_path.display()
+                )],
+            ));
+        }
+
+        if let Some(runtime_features) = &self.plan.codex_runtime_features {
+            sections.push(Section::new(
+                "Codex Runtime",
+                vec![format!(
+                    "version={}, request_user_input={}",
+                    runtime_features
+                        .version
+                        .as_deref()
+                        .unwrap_or("not detected"),
+                    if runtime_features.default_mode_request_user_input {
+                        "available"
+                    } else {
+                        "Markdown fallback"
+                    }
+                )],
+            ));
+        }
+
         if !self.warnings.is_empty() {
             sections.push(Section::new("Warnings", self.warnings.clone()));
         }

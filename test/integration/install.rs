@@ -86,6 +86,126 @@ fn installs_project_scope_codex_harness() {
     let megara_config = fs::read_to_string(dir.path().join(".agents/megara.toml")).unwrap();
     assert!(megara_config.contains("default_active_skills = [\"caveman\"]"));
 }
+
+#[cfg(unix)]
+#[test]
+fn codex_projection_uses_native_questions_only_when_runtime_advertises_them() {
+    let supported_project = tempdir().unwrap();
+    let supported_codex_home = tempdir().unwrap();
+    let supported_runtime = tempdir().unwrap();
+    write_codex_runtime(supported_runtime.path(), true);
+
+    let install = megara_with_codex_home(supported_codex_home.path())
+        .args(["install", "--scope", "project", "--target", "codex"])
+        .env("PATH", supported_runtime.path())
+        .current_dir(supported_project.path())
+        .output()
+        .unwrap();
+    assert!(
+        install.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&install.stderr)
+    );
+    let supported_config =
+        fs::read_to_string(supported_project.path().join(".codex/config.toml")).unwrap();
+    assert!(supported_config.contains("default_mode_request_user_input = true"));
+    assert!(supported_config.contains("MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT"));
+    let supported_agents =
+        fs::read_to_string(supported_project.path().join(".codex/AGENTS.md")).unwrap();
+    assert!(supported_agents
+        .contains("only when `default_mode_request_user_input` is enabled by this projection"));
+    assert!(String::from_utf8_lossy(&install.stdout).contains("request_user_input=available"));
+
+    let fallback_project = tempdir().unwrap();
+    let fallback_codex_home = tempdir().unwrap();
+    let fallback_runtime = tempdir().unwrap();
+    write_codex_runtime(fallback_runtime.path(), false);
+    let install = megara_with_codex_home(fallback_codex_home.path())
+        .args(["install", "--scope", "project", "--target", "codex"])
+        .env("PATH", fallback_runtime.path())
+        .current_dir(fallback_project.path())
+        .output()
+        .unwrap();
+    assert!(
+        install.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&install.stderr)
+    );
+    let fallback_config =
+        fs::read_to_string(fallback_project.path().join(".codex/config.toml")).unwrap();
+    assert!(!fallback_config.contains("default_mode_request_user_input"));
+    let fallback_agents =
+        fs::read_to_string(fallback_project.path().join(".codex/AGENTS.md")).unwrap();
+    assert!(fallback_agents.contains("If the feature is unavailable"));
+    assert!(
+        String::from_utf8_lossy(&install.stdout).contains("request_user_input=Markdown fallback")
+    );
+
+    let sync = megara_with_codex_home(fallback_codex_home.path())
+        .args(["sync", "--scope", "project", "--target", "codex"])
+        .env("PATH", supported_runtime.path())
+        .current_dir(fallback_project.path())
+        .output()
+        .unwrap();
+    assert!(
+        sync.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&sync.stdout),
+        String::from_utf8_lossy(&sync.stderr)
+    );
+    let synced_config =
+        fs::read_to_string(fallback_project.path().join(".codex/config.toml")).unwrap();
+    assert!(synced_config.contains("default_mode_request_user_input = true"));
+    assert!(synced_config.contains("MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT"));
+
+    let downgrade = megara_with_codex_home(supported_codex_home.path())
+        .args(["sync", "--scope", "project", "--target", "codex"])
+        .env("PATH", fallback_runtime.path())
+        .current_dir(supported_project.path())
+        .output()
+        .unwrap();
+    assert!(
+        downgrade.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&downgrade.stdout),
+        String::from_utf8_lossy(&downgrade.stderr)
+    );
+    let downgraded_config =
+        fs::read_to_string(supported_project.path().join(".codex/config.toml")).unwrap();
+    assert!(!downgraded_config.contains("default_mode_request_user_input"));
+    assert!(!downgraded_config.contains("MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT"));
+}
+
+#[cfg(unix)]
+#[test]
+fn project_install_preserves_an_explicit_user_feature_disable() {
+    let project = tempdir().unwrap();
+    let codex_home = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+    write_codex_runtime(runtime.path(), true);
+    let config = project.path().join(".codex/config.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(
+        &config,
+        "[features]\ndefault_mode_request_user_input = false\n",
+    )
+    .unwrap();
+
+    let install = megara_with_codex_home(codex_home.path())
+        .args(["install", "--scope", "project", "--target", "codex"])
+        .env("PATH", runtime.path())
+        .current_dir(project.path())
+        .output()
+        .unwrap();
+    assert!(
+        install.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&install.stderr)
+    );
+    let updated = fs::read_to_string(config).unwrap();
+    assert!(updated.contains("default_mode_request_user_input = false"));
+    assert!(!updated.contains("MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT"));
+}
 #[test]
 fn install_migrates_legacy_project_runtime_state() {
     let dir = tempdir().unwrap();

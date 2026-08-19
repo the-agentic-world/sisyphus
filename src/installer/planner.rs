@@ -33,6 +33,8 @@ impl<'a> Planner<'a> {
 
     fn plan_with_managed_edits(&self, include_managed_edits: bool) -> Result<InstallPlan> {
         let paths = InstallPaths::resolve(self.options.scope, self.options.target)?;
+        let codex_runtime_features =
+            (self.options.target == TargetRuntime::Codex).then(codex::detect_runtime_features);
         let mut files = Vec::new();
         let mut managed_toml_edits = Vec::new();
         files.extend(runtime_support_files(
@@ -61,6 +63,9 @@ impl<'a> Planner<'a> {
                         self.options.scope,
                         &projection_registry,
                         self.options.force,
+                        codex_runtime_features
+                            .as_ref()
+                            .expect("Codex projection has runtime features"),
                     )?
                 } else {
                     (
@@ -69,6 +74,9 @@ impl<'a> Planner<'a> {
                             self.options.scope,
                             &projection_registry,
                             self.options.force,
+                            codex_runtime_features
+                                .as_ref()
+                                .expect("Codex projection has runtime features"),
                         )?,
                         None,
                     )
@@ -109,6 +117,7 @@ impl<'a> Planner<'a> {
             ssot_root: paths.ssot_root,
             runtime_root: paths.runtime_root,
             target_root: paths.target_root,
+            codex_runtime_features,
             files,
             managed_toml_edits,
             obsolete_files,
@@ -158,7 +167,34 @@ impl<'a> Planner<'a> {
         )?
         .into_iter()
         .collect::<Vec<_>>();
+        let project_trust = if self.options.target == TargetRuntime::Codex
+            && self.options.scope == InstallScope::Project
+            && self.options.trust_project
+        {
+            Some(codex::ensure_project_trust(
+                plan.target_root
+                    .parent()
+                    .context("Codex project root has no parent")?,
+                self.options.dry_run,
+            )?)
+        } else {
+            None
+        };
         let mut warnings = runtime_dependency_issues(self.options.target);
+        if self.options.target == TargetRuntime::Codex
+            && self.options.scope == InstallScope::Project
+            && !self.options.trust_project
+            && !codex::is_project_trusted(
+                plan.target_root
+                    .parent()
+                    .context("Codex project root has no parent")?,
+            )?
+        {
+            warnings.push(
+                "Codex project config remains inactive until you trust the project in Codex or rerun install with --trust-project."
+                    .to_string(),
+            );
+        }
         if self.options.target == TargetRuntime::Pi && self.options.scope == InstallScope::Project {
             if self.options.trust_project {
                 let projection_registry = match self.options.action {
@@ -196,6 +232,7 @@ impl<'a> Planner<'a> {
             plan,
             summary,
             migrations,
+            project_trust,
             warnings,
         })
     }

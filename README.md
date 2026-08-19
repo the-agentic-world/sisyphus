@@ -84,7 +84,7 @@ megara install
 현재 프로젝트에 Codex용 하네스를 설치합니다.
 
 ```bash
-megara install --scope project --target codex
+megara install --scope project --target codex --trust-project
 ```
 
 현재 프로젝트에 Pi Coding Agent용 하네스를 설치하고, 생성된 역할 에이전트 실행을 신뢰합니다.
@@ -94,6 +94,10 @@ megara install --scope project --target pi --trust-project
 ```
 
 Pi는 `@earendil-works/pi-coding-agent >=0.80.10, <0.81.0`을 요구합니다. `--trust-project` 없이 설치하면 파일은 생성되지만 역할 에이전트 실행은 차단됩니다. 대화형 설치에서는 같은 신뢰 결정을 묻습니다.
+
+Codex의 프로젝트 `.codex/config.toml`은 프로젝트를 신뢰할 때만 활성화됩니다. 내용을 검토한 뒤 `--trust-project`를 사용하세요. 이 옵션 없이 설치하면 파일은 생성되지만 Codex 설정은 비활성 상태로 남고 `doctor`가 이를 알립니다. 자세한 신뢰 규칙은 [Codex config reference](https://learn.chatgpt.com/docs/config-file/config-reference)를 참고하세요.
+
+Megara는 설치·sync·update 때 `codex features list`로 `default_mode_request_user_input`을 확인합니다. 런타임이 이 기능을 광고하면 해당 설정을 활성화해 자연스러운 선택형 질문을 사용하고, 구버전·미설치·미지원 런타임에서는 기존 Markdown 질문 흐름을 유지합니다. Megara가 추가한 설정만 이후 sync/update에서 정리하며, 사용자가 명시한 `false` 설정은 덮어쓰지 않습니다.
 
 역할별 모델 정책을 대화형으로 설정합니다.
 

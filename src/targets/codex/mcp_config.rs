@@ -10,8 +10,22 @@ use sha2::{Digest, Sha256};
 use toml_edit::{value, Array, DocumentMut, ImDocument, Item, Table, Value as EditValue};
 
 const MCP_HASH_PREFIX: &str = "# MEGARA:MCP-SHA256=";
+pub(super) const DEFAULT_MODE_REQUEST_USER_INPUT: &str = "default_mode_request_user_input";
+pub(super) const DEFAULT_MODE_REQUEST_USER_INPUT_MARKER: &str =
+    "# MEGARA:DEFAULT-MODE-REQUEST-USER-INPUT";
 
-pub(super) fn plan(root: &Path, executable: &Path, force: bool) -> Result<ManagedTomlEdit> {
+#[derive(Clone, Copy)]
+struct RenderOptions {
+    force: bool,
+    runtime_supports_default_mode_request_user_input: bool,
+}
+
+pub(super) fn plan(
+    root: &Path,
+    executable: &Path,
+    force: bool,
+    runtime_supports_default_mode_request_user_input: bool,
+) -> Result<ManagedTomlEdit> {
     let path = root.join("config.toml");
     let (source, existing, permissions) = match read_existing(&path)? {
         Some((source, existing, permissions)) => (Some(source), Some(existing), Some(permissions)),
@@ -30,7 +44,10 @@ pub(super) fn plan(root: &Path, executable: &Path, force: bool) -> Result<Manage
         permissions,
         executable,
         &project_root,
-        force,
+        RenderOptions {
+            force,
+            runtime_supports_default_mode_request_user_input,
+        },
     )
 }
 
@@ -40,14 +57,30 @@ pub(super) fn plan_remove(root: &Path, force: bool) -> Result<Option<ManagedToml
         return Ok(None);
     };
     let (without_hash, stored_hash) = remove_hash_line(&existing);
-    let mut document: DocumentMut = without_hash
+    let (without_feature_marker, feature_marker_present) =
+        remove_marker_line(&without_hash, DEFAULT_MODE_REQUEST_USER_INPUT_MARKER);
+    let mut document: DocumentMut = without_feature_marker
         .parse()
         .context("failed to parse Codex config TOML")?;
     let Some(servers) = document.get_mut("mcp_servers").and_then(Item::as_table_mut) else {
-        return Ok(None);
+        return remove_stale_feature_setting(
+            &path,
+            source,
+            permissions,
+            document,
+            stored_hash,
+            feature_marker_present,
+        );
     };
     let Some(current) = servers.get("megara_planning") else {
-        return Ok(None);
+        return remove_stale_feature_setting(
+            &path,
+            source,
+            permissions,
+            document,
+            stored_hash,
+            feature_marker_present,
+        );
     };
     let current_hash = item_hash(current)?;
     let managed = stored_hash.as_deref() == Some(current_hash.as_str());
@@ -58,6 +91,7 @@ pub(super) fn plan_remove(root: &Path, force: bool) -> Result<Option<ManagedToml
         .then(|| table_backup(&existing))
         .transpose()?;
     servers.remove("megara_planning");
+    configure_default_mode_request_user_input(&mut document, false, feature_marker_present)?;
     let desired = document.to_string();
     Ok(Some(ManagedTomlEdit {
         path: path.clone(),
@@ -71,6 +105,39 @@ pub(super) fn plan_remove(root: &Path, force: bool) -> Result<Option<ManagedToml
     }))
 }
 
+fn remove_stale_feature_setting(
+    path: &Path,
+    source: Vec<u8>,
+    permissions: fs::Permissions,
+    mut document: DocumentMut,
+    stored_hash: Option<String>,
+    feature_marker_present: bool,
+) -> Result<Option<ManagedTomlEdit>> {
+    if !feature_marker_present {
+        return Ok(None);
+    }
+    configure_default_mode_request_user_input(&mut document, false, true)?;
+    let mut desired = document.to_string();
+    if let Some(stored_hash) = stored_hash {
+        if !desired.ends_with('\n') {
+            desired.push('\n');
+        }
+        desired.push_str(MCP_HASH_PREFIX);
+        desired.push_str(&stored_hash);
+        desired.push('\n');
+    }
+    Ok(Some(ManagedTomlEdit {
+        path: path.to_path_buf(),
+        created: false,
+        changed: desired.as_bytes() != source.as_slice(),
+        backup_path: None,
+        desired,
+        backup: None,
+        expected_source: Some(source),
+        permissions: Some(permissions),
+    }))
+}
+
 fn render(
     path: &Path,
     source: Option<&[u8]>,
@@ -78,11 +145,13 @@ fn render(
     permissions: Option<fs::Permissions>,
     executable: &Path,
     project_root: &Path,
-    force: bool,
+    options: RenderOptions,
 ) -> Result<ManagedTomlEdit> {
     let base = existing.unwrap_or("# Megara Codex projection.\n");
     let (without_hash, stored_hash) = remove_hash_line(base);
-    let mut document: DocumentMut = without_hash
+    let (without_feature_marker, feature_marker_present) =
+        remove_marker_line(&without_hash, DEFAULT_MODE_REQUEST_USER_INPUT_MARKER);
+    let mut document: DocumentMut = without_feature_marker
         .parse()
         .context("failed to parse Codex config TOML")?;
     let current = document
@@ -91,10 +160,10 @@ fn render(
         .and_then(|servers| servers.get("megara_planning"));
     let current_hash = current.map(item_hash).transpose()?;
     let unmanaged = current_hash.as_deref() != stored_hash.as_deref();
-    if current.is_some() && unmanaged && !force {
+    if current.is_some() && unmanaged && !options.force {
         bail!("unmanaged or directly edited megara_planning MCP table; rerun with --force");
     }
-    let backup = if current.is_some() && unmanaged && force {
+    let backup = if current.is_some() && unmanaged && options.force {
         Some(table_backup(base)?)
     } else {
         None
@@ -109,8 +178,18 @@ fn render(
             .get("megara_planning")
             .expect("MCP table was inserted"),
     )?;
+    let (_default_mode_request_user_input, feature_is_managed) =
+        configure_default_mode_request_user_input(
+            &mut document,
+            options.runtime_supports_default_mode_request_user_input,
+            feature_marker_present,
+        )?;
     let mut desired = document.to_string();
     if !desired.ends_with('\n') {
+        desired.push('\n');
+    }
+    if feature_is_managed {
+        desired.push_str(DEFAULT_MODE_REQUEST_USER_INPUT_MARKER);
         desired.push('\n');
     }
     desired.push_str(MCP_HASH_PREFIX);
@@ -154,6 +233,64 @@ fn desired_item(executable: &Path, project_root: &Path) -> Item {
     }
     table.insert("tools", Item::Table(tools));
     Item::Table(table)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DefaultModeRequestUserInputSetting {
+    Missing,
+    Enabled,
+    DisabledOrInvalid,
+}
+
+fn default_mode_request_user_input_setting(
+    document: &DocumentMut,
+) -> DefaultModeRequestUserInputSetting {
+    let Some(features) = document.get("features").and_then(Item::as_table_like) else {
+        return DefaultModeRequestUserInputSetting::Missing;
+    };
+    let Some(value) = features.get(DEFAULT_MODE_REQUEST_USER_INPUT) else {
+        return DefaultModeRequestUserInputSetting::Missing;
+    };
+    if value
+        .as_value()
+        .and_then(EditValue::as_bool)
+        .is_some_and(|enabled| enabled)
+    {
+        DefaultModeRequestUserInputSetting::Enabled
+    } else {
+        DefaultModeRequestUserInputSetting::DisabledOrInvalid
+    }
+}
+
+pub(super) fn configure_default_mode_request_user_input(
+    document: &mut DocumentMut,
+    runtime_supports_default_mode_request_user_input: bool,
+    feature_marker_present: bool,
+) -> Result<(bool, bool)> {
+    let setting = default_mode_request_user_input_setting(document);
+    if !runtime_supports_default_mode_request_user_input {
+        if feature_marker_present && setting == DefaultModeRequestUserInputSetting::Enabled {
+            let features = document
+                .get_mut("features")
+                .and_then(Item::as_table_like_mut)
+                .context("features must be a TOML table")?;
+            features.remove(DEFAULT_MODE_REQUEST_USER_INPUT);
+        }
+        return Ok((false, false));
+    }
+
+    match setting {
+        DefaultModeRequestUserInputSetting::Enabled => Ok((true, feature_marker_present)),
+        DefaultModeRequestUserInputSetting::DisabledOrInvalid => Ok((false, false)),
+        DefaultModeRequestUserInputSetting::Missing => {
+            let features = document["features"].or_insert(Item::Table(Table::new()));
+            let features = features
+                .as_table_like_mut()
+                .context("features must be a TOML table")?;
+            features.insert(DEFAULT_MODE_REQUEST_USER_INPUT, value(true));
+            Ok((true, true))
+        }
+    }
 }
 
 fn item_hash(item: &Item) -> Result<String> {
@@ -268,6 +405,20 @@ fn remove_hash_line(content: &str) -> (String, Option<String>) {
         }
     }
     (result, hash)
+}
+
+pub(super) fn remove_marker_line(content: &str, marker: &str) -> (String, bool) {
+    let mut result = String::new();
+    let mut found = false;
+    for segment in content.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n').trim_end_matches('\r');
+        if line == marker {
+            found = true;
+        } else {
+            result.push_str(segment);
+        }
+    }
+    (result, found)
 }
 
 fn read_existing(path: &Path) -> Result<Option<(Vec<u8>, String, fs::Permissions)>> {

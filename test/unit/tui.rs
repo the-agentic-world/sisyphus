@@ -134,7 +134,12 @@ fn scripted_install_wizard_preserves_existing_flags() {
     args.force = true;
     let result = scripted_install_wizard(
         args,
-        &[TuiInput::Select(0), TuiInput::Confirm, TuiInput::Confirm],
+        &[
+            TuiInput::Select(0),
+            TuiInput::Confirm,
+            TuiInput::Confirm,
+            TuiInput::Confirm,
+        ],
     )
     .expect("wizard should succeed")
     .expect("wizard should confirm");
@@ -144,6 +149,7 @@ fn scripted_install_wizard_preserves_existing_flags() {
     assert_eq!(result.target, Some(TargetArg::Codex));
     assert!(result.dry_run);
     assert!(result.force);
+    assert!(result.trust_project);
 }
 
 #[test]

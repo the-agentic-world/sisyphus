@@ -325,22 +325,44 @@ where
         };
     }
 
-    if args.target == Some(TargetArg::Pi) && !args.trust_project {
-        let selected = choose(
-            "Megara Install",
-            "Allow the generated Pi extension to run this project's role agents?",
-            &[
-                MenuOption::new(
-                    "Trust project agents",
-                    "Required before Pi can run project-local role agents.",
-                ),
-                MenuOption::new(
-                    "Install without trust",
-                    "Install files now and enable role agents later with --trust-project.",
-                ),
-            ],
-        )?;
-        args.trust_project = matches!(selected, Some(0));
+    if args.scope == Some(ScopeArg::Project) && !args.trust_project {
+        match args.target {
+            Some(TargetArg::Codex) => {
+                let selected = choose(
+                    "Megara Install",
+                    "Trust this project in Codex?",
+                    &[
+                        MenuOption::new(
+                            "Trust project",
+                            "Allow this project's .codex config, MCP, and rules to load.",
+                        ),
+                        MenuOption::new(
+                            "Install without trust",
+                            "Keep project config inactive until you rerun install with --trust-project.",
+                        ),
+                    ],
+                )?;
+                args.trust_project = matches!(selected, Some(0));
+            }
+            Some(TargetArg::Pi) => {
+                let selected = choose(
+                    "Megara Install",
+                    "Allow the generated Pi extension to run this project's role agents?",
+                    &[
+                        MenuOption::new(
+                            "Trust project agents",
+                            "Required before Pi can run project-local role agents.",
+                        ),
+                        MenuOption::new(
+                            "Install without trust",
+                            "Install files now and enable role agents later with --trust-project.",
+                        ),
+                    ],
+                )?;
+                args.trust_project = matches!(selected, Some(0));
+            }
+            None => unreachable!("target selected"),
+        }
     }
 
     let selected = choose(
